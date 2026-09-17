@@ -1,7 +1,7 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 pub struct Wallet {
-    pub public_key: Signature,
+    pub public_key: VerifyingKey,
     signing_key: SigningKey,
 }
 pub struct Transaction {
@@ -14,9 +14,9 @@ impl Wallet {
     pub fn new() -> Wallet {
         let signing_key = SigningKey::generate(&mut OsRng);
 
-        let signature = signing_key.sign(message);
+        let public_key = signing_key.verifying_key();
         Wallet {
-            signature,
+            public_key,
             signing_key,
         }
     }
