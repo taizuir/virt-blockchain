@@ -1,6 +1,7 @@
 pub mod sha256;
-
+pub mod wallet;
 use sha256::sha256_hex;
+use wallet::Transaction;
 
 pub struct Block {
     pub index: u64,
@@ -66,6 +67,7 @@ impl Block {
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,
+    pub mempool: Vec<Transaction>,
 }
 
 impl Blockchain {
@@ -73,6 +75,7 @@ impl Blockchain {
         Blockchain {
             chain: vec![Block::genesis(1)],
             difficulty: 1,
+            mempool: vec![],
         }
     }
 
@@ -80,6 +83,7 @@ impl Blockchain {
         Blockchain {
             chain: vec![Block::genesis(difficulty)],
             difficulty,
+            mempool: vec![],
         }
     }
 
@@ -107,5 +111,8 @@ impl Blockchain {
             }
         }
         true
+    }
+    pub fn asked_transaction(&mut self, T: Transaction) -> bool {
+        T.verify()
     }
 }
