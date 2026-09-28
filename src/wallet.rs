@@ -6,7 +6,7 @@ pub struct Wallet {
     pub public_key: VerifyingKey,
     signing_key: SigningKey,
 }
-//descritof  de transaciton
+//descriptif  de transaction
 pub struct Transaction {
     pub from: String,
     pub to: String,

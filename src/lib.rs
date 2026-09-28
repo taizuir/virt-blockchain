@@ -2,18 +2,18 @@ pub mod sha256;
 pub mod wallet;
 use sha256::sha256_hex;
 use wallet::Transaction;
-
+use std::mem:take; 
 pub struct Block {
     pub index: u64,
     pub timestamp: u64,
-    pub data: String,
+    pub data: Transaction,
     pub prev_hash: String,
     pub hash: String,
     pub nonce: u64,
 }
 
 impl Block {
-    pub fn new(index: u64, data: String, prev_hash: String, difficulty: usize) -> Block {
+    pub fn new(index: u64, data: Transaction, prev_hash: String, difficulty: usize) -> Block {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -31,16 +31,27 @@ impl Block {
         block.mine(difficulty);
         block
     }
+   // ne pas renvoyer une string  et convertir les de=onner de transcaction en byte pour pouvoir tranferere els donne methodee a peu près similaire à celle dans le wallet
+    pub fn header_bytes(&self) -> Vec<u8> { 
+        let mut bytes :Vec<u8>= vec![];
+        bytes.extend_from_slice(&self.index.to_be_bytes());
+        bytes.extend_from_slice(&self.timestamp.to_be_bytes());
+        for fields in &self.transactions {
+            bytes.extend_from_slice(&fields.payload());
 
-    pub fn header_string(&self) -> String {
-        format!(
-            "{}{}{}{}{}",
-            self.index, self.timestamp, self.data, self.prev_hash, self.nonce
-        )
+        }
+        bytes.extend_from_slice(self.prev_hash.as_bytes());
+        bytes.extent_from_slice(self.hash.as_bytes());
+        bytes.extend_from_slice(&self.nonce.to_be_bytes());
+        bytes
+
+
+
+
     }
 
     pub fn calculate_hash(&self) -> String {
-        sha256_hex(self.header_string().as_bytes())
+        sha256_hex(&self.header_bytes())
     }
 
     pub fn mine(&mut self, difficulty: usize) {
@@ -57,7 +68,7 @@ impl Block {
     pub fn genesis(difficulty: usize) -> Block {
         Block::new(
             0,
-            String::from("genesis block"),
+            vec![],
             String::from("0"),
             difficulty,
         )
@@ -91,10 +102,11 @@ impl Blockchain {
         self.chain.last().unwrap()
     }
 
-    pub fn add_block(&mut self, data: String) {
+    pub fn add_block(&mut self) {
+        let clean_mempool= mem::take(&self.mempool)
         let prev_hash = self.access_last().hash.clone();
         let new_index = self.access_last().index + 1;
-        let new_block = Block::new(new_index, data, prev_hash, self.difficulty);
+        let new_block = Block::new(new_index,clean_mempool , prev_hash, self.difficulty);
         self.chain.push(new_block);
     }
 
@@ -102,7 +114,11 @@ impl Blockchain {
         for i in 1..self.chain.len() {
             let current = &self.chain[i];
             let previous = &self.chain[i - 1];
-
+            for i in current.data{
+                if  !i.verify() {
+                    return false
+                }
+            }
             if current.hash != current.calculate_hash() {
                 return false; // intégrité du bloc cassée
             }
