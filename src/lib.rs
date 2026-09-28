@@ -3,6 +3,7 @@ pub mod wallet;
 use sha256::sha256_hex;
 use wallet::Transaction;
 use std::mem:take; 
+//un simple bloc sur le blockcahin il contient son numero sa date de création  une transacation le hash de la clé en cour le hashde la clé du block precedent 
 pub struct Block {
     pub index: u64,
     pub timestamp: u64,
@@ -14,11 +15,12 @@ pub struct Block {
 
 impl Block {
     pub fn new(index: u64, data: Transaction, prev_hash: String, difficulty: usize) -> Block {
+        //recupère al date
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-
+        //creéee un block
         let mut block = Block {
             index,
             timestamp,
@@ -31,7 +33,7 @@ impl Block {
         block.mine(difficulty);
         block
     }
-   // ne pas renvoyer une string  et convertir les de=onner de transcaction en byte pour pouvoir tranferere els donne methodee a peu près similaire à celle dans le wallet
+   // prend les info di bock pour le convertir en bytes et ensuite paermmetre de crypter
     pub fn header_bytes(&self) -> Vec<u8> { 
         let mut bytes :Vec<u8>= vec![];
         bytes.extend_from_slice(&self.index.to_be_bytes());
@@ -49,11 +51,11 @@ impl Block {
 
 
     }
-
+    // crypte la clé
     pub fn calculate_hash(&self) -> String {
         sha256_hex(&self.header_bytes())
     }
-
+    // hash tant que on a pas un diifficulty dnomcre de zero a debut sert à
     pub fn mine(&mut self, difficulty: usize) {
         let target = "0".repeat(difficulty);
         loop {
@@ -74,7 +76,7 @@ impl Block {
         )
     }
 }
-
+// la bockcjain contient les blocs une difculté choisi et une liste de transacton a ajouter 
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,
@@ -89,7 +91,7 @@ impl Blockchain {
             mempool: vec![],
         }
     }
-
+    //new rendu plus difficulté
     pub fn with_difficulty(difficulty: usize) -> Blockchain {
         Blockchain {
             chain: vec![Block::genesis(difficulty)],
@@ -97,7 +99,7 @@ impl Blockchain {
             mempool: vec![],
         }
     }
-
+    // donne accès au dernier elemetn
     pub fn access_last(&self) -> &Block {
         self.chain.last().unwrap()
     }
