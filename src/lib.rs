@@ -1,20 +1,20 @@
 pub mod sha256;
 pub mod wallet;
 use sha256::sha256_hex;
+use std::mem::take;
 use wallet::Transaction;
-use std::mem:take; 
-//un simple bloc sur le blockcahin il contient son numero sa date de création  une transacation le hash de la clé en cour le hashde la clé du block precedent 
+//un simple bloc sur le blockcahin il contient son numero sa date de création  une transacation le hash de la clé en cour le hashde la clé du block precedent
 pub struct Block {
     pub index: u64,
     pub timestamp: u64,
-    pub data: Transaction,
+    pub data: Vec<Transaction>,
     pub prev_hash: String,
     pub hash: String,
     pub nonce: u64,
 }
 
 impl Block {
-    pub fn new(index: u64, data: Transaction, prev_hash: String, difficulty: usize) -> Block {
+    pub fn new(index: u64, data: Vec<Transaction>, prev_hash: String, difficulty: usize) -> Block {
         //recupère al date
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -33,23 +33,18 @@ impl Block {
         block.mine(difficulty);
         block
     }
-   // prend les info di bock pour le convertir en bytes et ensuite paermmetre de crypter
-    pub fn header_bytes(&self) -> Vec<u8> { 
-        let mut bytes :Vec<u8>= vec![];
+    // prend les info di bock pour le convertir en bytes et ensuite paermmetre de crypter
+    pub fn header_bytes(&self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = vec![];
         bytes.extend_from_slice(&self.index.to_be_bytes());
         bytes.extend_from_slice(&self.timestamp.to_be_bytes());
-        for fields in &self.transactions {
+        for fields in &self.data {
             bytes.extend_from_slice(&fields.payload());
-
         }
-        bytes.extend_from_slice(self.prev_hash.as_bytes());
-        bytes.extent_from_slice(self.hash.as_bytes());
+        bytes.extend_from_slice(&self.prev_hash.as_bytes());
+        bytes.extend_from_slice(&self.hash.as_bytes());
         bytes.extend_from_slice(&self.nonce.to_be_bytes());
         bytes
-
-
-
-
     }
     // crypte la clé
     pub fn calculate_hash(&self) -> String {
@@ -68,15 +63,10 @@ impl Block {
     }
 
     pub fn genesis(difficulty: usize) -> Block {
-        Block::new(
-            0,
-            vec![],
-            String::from("0"),
-            difficulty,
-        )
+        Block::new(0, vec![], String::from("0"), difficulty)
     }
 }
-// la bockcjain contient les blocs une difculté choisi et une liste de transacton a ajouter 
+// la bockcjain contient les blocs une difculté choisi et une liste de transacton a ajouter
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,
@@ -105,10 +95,10 @@ impl Blockchain {
     }
 
     pub fn add_block(&mut self) {
-        let clean_mempool= mem::take(&self.mempool)
+        let clean_mempool = take(&mut self.mempool);
         let prev_hash = self.access_last().hash.clone();
         let new_index = self.access_last().index + 1;
-        let new_block = Block::new(new_index,clean_mempool , prev_hash, self.difficulty);
+        let new_block = Block::new(new_index, clean_mempool, prev_hash, self.difficulty);
         self.chain.push(new_block);
     }
 
@@ -116,9 +106,9 @@ impl Blockchain {
         for i in 1..self.chain.len() {
             let current = &self.chain[i];
             let previous = &self.chain[i - 1];
-            for i in current.data{
-                if  !i.verify() {
-                    return false
+            for i in &current.data {
+                if !i.verify() {
+                    return false;
                 }
             }
             if current.hash != current.calculate_hash() {
@@ -130,7 +120,9 @@ impl Blockchain {
         }
         true
     }
-    pub fn asked_transaction(&mut self, T: Transaction) -> bool {
-        T.verify()
+    pub fn asked_transaction(&mut self, t: Transaction) -> () {
+        if t.verify() {
+            self.mempool.push(t)
+        }
     }
 }

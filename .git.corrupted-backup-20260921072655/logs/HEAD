@@ -1,0 +1,3 @@
+0000000000000000000000000000000000000000 09a228b98f2115739d34bf137e5c5c730e1575f4 Taizuir <timosl@protonmail.com> 1789422630 +0200	commit (initial): Initial commit: toy blockchain with SHA-256 proof-of-work
+09a228b98f2115739d34bf137e5c5c730e1575f4 99a77ad6fdbc302814dcf9ad97a60b1995890d0e Taizuir <timosl@protonmail.com> 1789676104 +0200	commit: Add wallet module with ed25519 keypair generation
+99a77ad6fdbc302814dcf9ad97a60b1995890d0e d7f74587587b3df11183449ea156d8c8fc5bdf6f Taizuir <timosl@protonmail.com> 1789676633 +0200	commit: Fix Wallet::new to derive public_key from verifying_key

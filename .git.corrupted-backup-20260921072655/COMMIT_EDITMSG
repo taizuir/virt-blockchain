@@ -1,0 +1,1 @@
+Fix Wallet::new to derive public_key from verifying_key

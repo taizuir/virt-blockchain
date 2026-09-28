@@ -7,3 +7,4 @@ edition = "2024"
 ed25519-dalek = { version = "3", features = ["rand_core"] }
 getrandom = { version = "0.4", features = ["sys_rng"] }
 hex = "0.4"
+mem = "0.5.0"

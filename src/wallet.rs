@@ -41,7 +41,7 @@ impl Transaction {
         let mut bytes: Vec<u8> = Vec::new();
         bytes.extend_from_slice(self.from.as_bytes());
         bytes.extend_from_slice(self.to.as_bytes());
-        bytes.extend_from_slice(self.amount.to_be_bytes());
+        bytes.extend_from_slice(&self.amount.to_be_bytes());
         bytes
     }
     pub fn sign(&mut self, wall: &Wallet) {
@@ -54,10 +54,10 @@ impl Transaction {
         let Ok(hexa_fixed): Result<[u8; 32], _> = hexa.try_into() else {
             return false;
         };
-        let Ok(checker) = VerifyingKey::from_bytes(&hexa) else {
+        let Ok(checker) = VerifyingKey::from_bytes(&hexa_fixed) else {
             return false;
         };
-        let Some(signa) = self.signature else {
+        let Some(signa) = &self.signature else {
             return false;
         };
         checker.verify(&self.payload(), &signa).is_ok()
