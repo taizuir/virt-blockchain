@@ -63,3 +63,31 @@ impl Transaction {
         checker.verify(&self.payload(), &signa).is_ok()
     }
 }
+#[cfg(test)]
+mod test {
+    use crate::wallet;
+    use 
+
+    use super::*;
+    #[test]
+    fn two_wallet_two_ashes() {
+        let wal1 = Wallet::new();
+        let wal2 = Wallet::new();
+        assert_ne!(wal1.public_key, wal2.public_key)
+    }
+    #[test]
+    fn size_of_the_hex_key() {
+        let wallet = Wallet::new();
+        assert_eq!(hex::encode(wallet.public_key.to_bytes()).len(), 64);
+        assert!(hex::encode(wallet.public_key.to_bytes()).is_ascii_lowercase());
+    }
+    #[test]
+    fn transaction_signature_field_is_correctly_initialised(){
+        let tr =Transaction::new("","",0) ;
+        assert_eq!(tr.signature,None);
+    }
+    #[test]
+    fn payload_testing(){
+
+    }
+}

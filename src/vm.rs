@@ -39,7 +39,7 @@ pub enum Instructions{
 }
 pub struct Vm{
     Pile:Vec<u64>,
-    Memory:[u64,16],
+    Memory:[u64;16],
     Gas:u64,
     Context:Vec<(String,String,u64)>,
     PersistentState: BTreeMap<String,u64>,
@@ -52,11 +52,11 @@ impl Vm{
         let Context=vec![];
         let PersistentState=BTreeMap::new();
         {
-            Pile,
-            Memory,
-            Gas,
-            Context,
-            PersistentState,
+            Pile;
+            Memory;
+            Gas;
+            Context;
+            PersistentState;
         }
 
     }
