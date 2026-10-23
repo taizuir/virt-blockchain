@@ -96,14 +96,6 @@ pub fn sha256_hex(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex::encode;
-
-    // Digest valide = 64 caractères, uniquement 0-9 et a-f minuscules.
-    fn is_valid_digest(s: &str) -> bool {
-        s.len() == 64
-            && s.chars()
-                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-    }
 
     #[test]
     fn empty_string() {
@@ -120,6 +112,60 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }
+    #[test]
+    fn padding_limit(){
+        let p55= "a".repeat(55);
+        let p56 = "a".repeat(56);
+        assert_eq!(sha256_hex(p55.as_bytes()),"248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+        assert_eq!(sha256_hex(p56.as_bytes()),"9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318");
+        
+    }
+    #[test]
+    fn limit_padding_plus_block(){
+        let p63= "a".repeat(63);
+        let p64 = "a".repeat(64);
+        assert_eq!(sha256_hex(p63.as_bytes()),"7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34");
+        assert_eq!(sha256_hex(p64.as_bytes()),"ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb");
+        
+    }
+    #[test]
+    fn limit_padding_plus_several_block(){
+        let p119= "a".repeat(119);
+        assert_eq!(sha256_hex(p119.as_bytes()),"31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb");
+        
+    }
+    #[test] 
+    fn big_input(){
+        let p1000000="a".repeat(1000000);
+        assert_eq!(sha256_hex(p1000000.as_bytes()),"cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
+    }
+
+    #[test]
+    fn same_input_same_output(){
+        let in1="qsdf";
+        let in2="qsdf";
+        assert_eq!(sha256_hex(in1),sha256_hex(in2))
+    }
+    #[test]
+    fn compare_sha256_with_sha256_hex(){
+        let input= "qsdf";
+        assert_eq!(hex(sha256(input),sha256_hex(input))
+    }
+
+    fn is_valid_digest(s: &str) -> bool {
+        s.len() == 64
+            && s.chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    }
+
+    #[test]
+    fn helper_rejects_bad_digests() {
+        assert!(is_valid_digest(&"a".repeat(64)));
+        assert!(!is_valid_digest(&"a".repeat(63)));
+        assert!(!is_valid_digest(&"a".repeat(65)));
+        assert!(!is_valid_digest(&"A".repeat(64)));
+        assert!(!is_valid_digest(&"g".repeat(64)));
+    }
 
     #[test]
     fn nist_two_blocks() {
@@ -130,66 +176,14 @@ mod tests {
     }
 
     #[test]
-    fn padding_limit() {
-        let p55 = "a".repeat(55);
-        let p56 = "a".repeat(56);
+    fn your_own_strings() {
         assert_eq!(
-            sha256_hex(p55.as_bytes()),
-            "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318"
+            sha256_hex(b"qsdf"),
+            "669831a3180f1e77e9e3c904b76d625403924303118ff97acff2d8599b9dc91b"
         );
         assert_eq!(
-            sha256_hex(p56.as_bytes()),
-            "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
-        );
-    }
-
-    #[test]
-    fn limit_padding_plus_block() {
-        let p63 = "a".repeat(63);
-        let p64 = "a".repeat(64);
-        assert_eq!(
-            sha256_hex(p63.as_bytes()),
-            "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34"
-        );
-        assert_eq!(
-            sha256_hex(p64.as_bytes()),
-            "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"
-        );
-    }
-
-    #[test]
-    fn limit_padding_plus_several_block() {
-        let p119 = "a".repeat(119);
-        assert_eq!(
-            sha256_hex(p119.as_bytes()),
-            "31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb"
-        );
-    }
-
-    // Lent en debug. Lancer avec : cargo test --release -- --ignored
-    #[test]
-    #[ignore = "lent en debug"]
-    fn big_input() {
-        let p1000000 = "a".repeat(1000000);
-        assert_eq!(
-            sha256_hex(p1000000.as_bytes()),
-            "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
-        );
-    }
-
-    #[test]
-    fn same_input_same_output() {
-        let in1 = "qsdf";
-        let in2 = "qsdf";
-        assert_eq!(sha256_hex(in1.as_bytes()), sha256_hex(in2.as_bytes()));
-    }
-
-    #[test]
-    fn compare_sha256_with_sha256_hex() {
-        let input = "qsdf";
-        assert_eq!(
-            encode(sha256(input.as_bytes())),
-            sha256_hex(input.as_bytes())
+            sha256_hex(b"hello blockchain"),
+            "cf55026ba78c889dbdaf0c32701cdb4d662f3d3ea4460110d3ed2edd0d753e72"
         );
     }
 
@@ -208,10 +202,28 @@ mod tests {
     }
 
     #[test]
-    fn helper_rejects_bad_digests() {
-        assert!(is_valid_digest(&"a".repeat(64)));
-        assert!(!is_valid_digest(&"a".repeat(63)));
-        assert!(!is_valid_digest(&"A".repeat(64)));
-        assert!(!is_valid_digest(&"g".repeat(64)));
+    fn pad_layout() {
+        for n in [0usize, 1, 55, 56, 63, 64, 100] {
+            let data = vec![7u8; n];
+            let padded = pad(&data);
+            assert_eq!(padded.len() % 64, 0, "n={}", n);
+            assert_eq!(&padded[..n], &data[..], "n={}", n);
+            assert_eq!(padded[n], 0x80, "n={}", n);
+            let tail: [u8; 8] = padded[padded.len() - 8..].try_into().unwrap();
+            assert_eq!(u64::from_be_bytes(tail), (n as u64) * 8, "n={}", n);
+        }
+    }
+
+    #[test]
+    fn avalanche() {
+        let a = sha256(b"abc");
+        let b = sha256(b"abd");
+        assert_ne!(a, b);
+        let differing_bits: u32 = a
+            .iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x ^ y).count_ones())
+            .sum();
+        assert!(differing_bits > 64, "seulement {} bits différents", differing_bits);
     }
 }
