@@ -1,21 +1,21 @@
-use std::collections::Btreemap;;
+use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum VMErrors{
+pub enum VMErrors {
     ProgramTooLong,
-    UnknowOpcode(Vec<u8>),
+    UnknownOpcode(u8),
     TruncatedOperand,
-    InvalidRole(Vec<u8>),
-    InvalidJumpTarget(Vec<u8>),
-    StackUndeflow,
+    InvalidRole(u8),
+    InvalidJumpTarget(u32),
+    StackUnderflow,
     StackOverflow,
     ArithmeticOverflow,
-    DividedByZero,
-    MemoryOutOfBounds(i),
+    DivisionByZero,
+    MemoryOutOfBounds(usize),
     OutOfGas,
     Reverted,
-
 }
-pub enum Instructions{
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Instructions {
     Add,
     Push(u64),
     Subtraction,
@@ -37,34 +37,54 @@ pub enum Instructions{
     LoadBalance(u8),
     StoreBalance(u8),
 }
-pub struct Vm{
-    Pile:Vec<u64>,
-    Memory:[u64;16],
-    Gas:u64,
-    Context:Vec<(String,String,u64)>,
-    PersistentState: BTreeMap<String,u64>,
+pub struct Vm {
+    pile: Vec<u64>,
+    memory: [u64; 16],
+    gas: u64,
+    context: Vec<(String, String, u64)>,
+    persistentstate: BTreeMap<String, u64>,
 }
-impl Vm{
-    pub fn new(Context:Vec<(String,String,u64)>)->Vm{
-        let Pile = vec![];
-        let Memory=[0;16];
-        let Gas=10000;
-        let Context=vec![];
-        let PersistentState=BTreeMap::new();
-        {
-            Pile;
-            Memory;
-            Gas;
-            Context;
-            PersistentState;
+impl Vm {
+    pub fn new(context: Vec<(String, String, u64)>) -> Vm {
+        let pile = vec![];
+        let memory = [0; 16];
+        let gas = 10000;
+        let persistentstate = BTreeMap::new();
+        Vm {
+            pile,
+            memory,
+            gas,
+            context,
+            persistentstate,
         }
+    }
+    fn pop(&mut self) -> Result<u64, VMErrors> {
+        self.pile.pop().ok_or(VMErrors::StackUnderflow)
+    }
+    fn push(&mut self, elmt: u64) -> Result<(), VMErrors> {
+        if self.pile.len() >= 256 {
+            return Err(VMErrors::StackOverflow);
+        } else {
+            self.pile.push(elmt);
+            Ok(())
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn pop_on_empty_stack() {
+        let mut vm = Vm::new(vec![]);
+        assert_eq!(vm.pop(), Err(VMErrors::StackUnderflow));
+    }
 
-    }
-    fn pop(&mut self)->Result<(),VMErrors>{
-        self.Pile.pop().ok_or(VMError::StackUnderflow)
-    }
-    fn push(&mut self,elmt:u64 )->Result<(),VMErrors>{
-        if self.Pile.len()>=256{return VMErrors::StackOverflow}
-        else{self.Pile.push(u64)}
+    #[test]
+    fn push_257_values_overflows() {
+        let mut vm = Vm::new(vec![]);
+        for i in 0..256 {
+            assert_eq!(vm.push(i), Ok(()));
+        }
+        assert_eq!(vm.push(256), Err(VMErrors::StackOverflow));
     }
 }

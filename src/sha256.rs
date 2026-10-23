@@ -113,43 +113,61 @@ mod tests {
         );
     }
     #[test]
-    fn padding_limit(){
-        let p55= "a".repeat(55);
+    fn padding_limit() {
+        let p55 = "a".repeat(55);
         let p56 = "a".repeat(56);
-        assert_eq!(sha256_hex(p55.as_bytes()),"248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
-        assert_eq!(sha256_hex(p56.as_bytes()),"9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318");
-        
+        assert_eq!(
+            sha256_hex(p55.as_bytes()),
+            "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318"
+        );
+        assert_eq!(
+            sha256_hex(p56.as_bytes()),
+            "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
+        );
     }
     #[test]
-    fn limit_padding_plus_block(){
-        let p63= "a".repeat(63);
+    fn limit_padding_plus_block() {
+        let p63 = "a".repeat(63);
         let p64 = "a".repeat(64);
-        assert_eq!(sha256_hex(p63.as_bytes()),"7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34");
-        assert_eq!(sha256_hex(p64.as_bytes()),"ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb");
-        
+        assert_eq!(
+            sha256_hex(p63.as_bytes()),
+            "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34"
+        );
+        assert_eq!(
+            sha256_hex(p64.as_bytes()),
+            "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"
+        );
     }
     #[test]
-    fn limit_padding_plus_several_block(){
-        let p119= "a".repeat(119);
-        assert_eq!(sha256_hex(p119.as_bytes()),"31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb");
-        
+    fn limit_padding_plus_several_block() {
+        let p119 = "a".repeat(119);
+        assert_eq!(
+            sha256_hex(p119.as_bytes()),
+            "31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb"
+        );
     }
-    #[test] 
-    fn big_input(){
-        let p1000000="a".repeat(1000000);
-        assert_eq!(sha256_hex(p1000000.as_bytes()),"cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
+    #[test]
+    fn big_input() {
+        let p1000000 = "a".repeat(1000000);
+        assert_eq!(
+            sha256_hex(p1000000.as_bytes()),
+            "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+        )
     }
 
     #[test]
-    fn same_input_same_output(){
-        let in1="qsdf";
-        let in2="qsdf";
-        assert_eq!(sha256_hex(in1),sha256_hex(in2))
+    fn same_input_same_output() {
+        let in1 = "qsdf";
+        let in2 = "qsdf";
+        assert_eq!(sha256_hex(in1.as_bytes()), sha256_hex(in2.as_bytes()))
     }
     #[test]
-    fn compare_sha256_with_sha256_hex(){
-        let input= "qsdf";
-        assert_eq!(hex(sha256(input),sha256_hex(input))
+    fn compare_sha256_with_sha256_hex() {
+        let input = "qsdf";
+        assert_eq!(
+            hex::encode(sha256(input.as_bytes())),
+            sha256_hex(input.as_bytes())
+        );
     }
 
     fn is_valid_digest(s: &str) -> bool {
@@ -224,6 +242,10 @@ mod tests {
             .zip(b.iter())
             .map(|(x, y)| (x ^ y).count_ones())
             .sum();
-        assert!(differing_bits > 64, "seulement {} bits différents", differing_bits);
+        assert!(
+            differing_bits > 64,
+            "seulement {} bits différents",
+            differing_bits
+        );
     }
 }

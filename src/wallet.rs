@@ -12,6 +12,7 @@ pub struct Transaction {
     pub to: String,
     pub amount: u64,
     pub signature: Option<Signature>,
+    pub count: u64,
 }
 impl Wallet {
     pub fn new() -> Wallet {
@@ -30,11 +31,13 @@ impl Wallet {
 impl Transaction {
     pub fn new(from: String, to: String, amount: u64) -> Transaction {
         let signature = None;
+        let count = 0;
         Transaction {
             from,
             to,
             amount,
             signature,
+            count,
         }
     }
     pub fn payload(&self) -> Vec<u8> {
@@ -42,12 +45,22 @@ impl Transaction {
         bytes.extend_from_slice(self.from.as_bytes());
         bytes.extend_from_slice(self.to.as_bytes());
         bytes.extend_from_slice(&self.amount.to_be_bytes());
+        bytes.extend_from_slice(&self.count.to_be_bytes());
         bytes
     }
     pub fn sign(&mut self, wall: &Wallet) {
         self.signature = Some(wall.sign(&self.payload()))
     }
     pub fn verify(&self) -> bool {
+        if !(self
+            .from
+            .chars()
+            .all(|s| s.is_ascii_digit() || ('a'..='f').contains(&s)))
+            && self.from.len() == 64
+        {
+            return false;
+        }
+
         let Ok(hexa) = hex::decode(&self.from) else {
             return false;
         };
@@ -131,14 +144,19 @@ mod tests {
     #[test]
     fn payload_length() {
         let tx = Transaction::new("alice".into(), "bob".into(), 5);
-        assert_eq!(tx.payload().len(), "alice".len() + "bob".len() + 8);
+        assert_eq!(tx.payload().len(), "alice".len() + "bob".len() + 16);
     }
 
     #[test]
-    fn payload_amount_is_big_endian_at_the_end() {
-        let tx = Transaction::new("a".into(), "b".into(), 0x0102_0304_0506_0708);
+    fn payload_amount_and_count_are_big_endian_at_the_end() {
+        let mut tx = Transaction::new("a".into(), "b".into(), 0x0102_0304_0506_0708);
+        tx.count = 0x1112_1314_1516_1718;
         let p = tx.payload();
-        assert_eq!(&p[p.len() - 8..], &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(&p[p.len() - 16..p.len() - 8], &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            &p[p.len() - 8..],
+            &[0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18]
+        );
     }
 
     #[test]
@@ -153,6 +171,10 @@ mod tests {
         assert_ne!(base, Transaction::new("x".into(), "b".into(), 5).payload());
         assert_ne!(base, Transaction::new("a".into(), "x".into(), 5).payload());
         assert_ne!(base, Transaction::new("a".into(), "b".into(), 6).payload());
+
+        let mut other_count = Transaction::new("a".into(), "b".into(), 5);
+        other_count.count = 1;
+        assert_ne!(base, other_count.payload());
     }
 
     #[test]
@@ -283,7 +305,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "faille connue : adresse non canonique (majuscules) acceptée"]
     fn rejects_uppercase_address() {
         let alice = Wallet::new();
         let bob = Wallet::new();

@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
+
 pub mod sha256;
 pub mod wallet;
 use sha256::sha256_hex;
 use std::mem::take;
 use wallet::Transaction;
+pub mod vm;
 //un simple bloc sur le blockcahin il contient son numero sa date de création  une transacation le hash de la clé en cour le hashde la clé du block precedent
 pub struct Block {
     pub index: u64,
@@ -42,7 +45,6 @@ impl Block {
             bytes.extend_from_slice(&fields.payload());
         }
         bytes.extend_from_slice(&self.prev_hash.as_bytes());
-        bytes.extend_from_slice(&self.hash.as_bytes());
         bytes.extend_from_slice(&self.nonce.to_be_bytes());
         bytes
     }
@@ -66,7 +68,7 @@ impl Block {
         Block::new(0, vec![], String::from("0"), difficulty)
     }
 }
-// la bockcjain contient les blocs une difculté choisi et une liste de transacton a ajouter
+// la bockchain contient les blocs une difculté choisi et une liste de transacton a ajouter
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,
@@ -103,7 +105,23 @@ impl Blockchain {
     }
 
     pub fn is_valid(&self) -> bool {
+        let target = "0".repeat(self.difficulty);
+        if self.chain[0].index != 0 {
+            return false;
+        } else if self.chain[0].prev_hash != "0" {
+            return false;
+        } else if !(self.chain[0].data.is_empty()) {
+            return false;
+        } else if !(self.chain[0].hash.starts_with(&target)) {
+            return false;
+        } else if self.chain[0].hash != self.chain[0].calculate_hash() {
+            return false;
+        }
+
         for i in 1..self.chain.len() {
+            if !(self.chain[i].hash.starts_with(&target)) {
+                return false;
+            }
             let current = &self.chain[i];
             let previous = &self.chain[i - 1];
             for i in &current.data {
@@ -116,6 +134,9 @@ impl Blockchain {
             }
             if current.prev_hash != previous.hash {
                 return false; // lien avec le bloc précédent cassé
+            }
+            if current.index != previous.index + 1 {
+                return false;
             }
         }
         true
