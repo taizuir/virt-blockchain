@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VMErrors {
     ProgramTooLong,
@@ -68,6 +69,119 @@ impl Vm {
             self.pile.push(elmt);
             Ok(())
         }
+    }
+}
+fn read_u8(bytes: &[u8]) -> Result<u8, VMErrors> {
+    bytes.get(1).copied().ok_or(VMErrors::TruncatedOperand)
+}
+
+fn read_u32(bytes: &[u8]) -> Result<u32, VMErrors> {
+    let raw: [u8; 4] = bytes
+        .get(1..5)
+        .ok_or(VMErrors::TruncatedOperand)?
+        .try_into()
+        .map_err(|_| VMErrors::TruncatedOperand)?;
+    Ok(u32::from_be_bytes(raw))
+}
+
+fn read_u64(bytes: &[u8]) -> Result<u64, VMErrors> {
+    let raw: [u8; 8] = bytes
+        .get(1..9)
+        .ok_or(VMErrors::TruncatedOperand)?
+        .try_into()
+        .map_err(|_| VMErrors::TruncatedOperand)?;
+    Ok(u64::from_be_bytes(raw))
+}
+impl Instructions {
+    pub fn encode(&self, bytes: &mut Vec<u8>) {
+        match self {
+            Instructions::Halt => bytes.push(0x00),
+            Instructions::Revert => bytes.push(0x01),
+            Instructions::Push(value) => {
+                bytes.push(0x10);
+                bytes.extend_from_slice(&value.to_be_bytes());
+            }
+            Instructions::Pop => bytes.push(0x11),
+            Instructions::Double => bytes.push(0x12),
+            Instructions::Swap => bytes.push(0x13),
+            Instructions::Add => bytes.push(0x20),
+            Instructions::Subtraction => bytes.push(0x21),
+            Instructions::Product => bytes.push(0x22),
+            Instructions::Divide => bytes.push(0x23),
+            Instructions::Equal => bytes.push(0x30),
+            Instructions::Lower => bytes.push(0x31),
+            Instructions::Greater => bytes.push(0x32),
+            Instructions::Load(cell) => {
+                bytes.push(0x40);
+                bytes.extend_from_slice(&cell.to_be_bytes());
+            }
+            Instructions::Store(cell) => {
+                bytes.push(0x41);
+                bytes.extend_from_slice(&cell.to_be_bytes());
+            }
+            Instructions::Jump(target) => {
+                bytes.push(0x50);
+                bytes.extend_from_slice(&target.to_be_bytes());
+            }
+            Instructions::JumpIfZero(target) => {
+                bytes.push(0x51);
+                bytes.extend_from_slice(&target.to_be_bytes());
+            }
+            Instructions::PushAmount => bytes.push(0x60),
+            Instructions::LoadBalance(role) => {
+                bytes.push(0x61);
+                bytes.extend_from_slice(&role.to_be_bytes());
+            }
+            Instructions::StoreBalance(role) => {
+                bytes.push(0x62);
+                bytes.extend_from_slice(&role.to_be_bytes());
+            }
+        }
+    }
+
+    pub fn encode_program(program: &[Instructions]) -> Vec<u8> {
+        let mut bytes: Vec<u8> = vec![];
+        for command in program {
+            command.encode(&mut bytes)
+        }
+        bytes
+    }
+    pub fn decode(bytes: &[u8]) -> Result<(Instructions, usize), VMErrors> {
+        let opcode = *bytes.first().ok_or(VMErrors::TruncatedOperand)?;
+        match opcode {
+            0x00 => Ok((Instructions::Halt, 1)),
+            0x01 => Ok((Instructions::Revert, 1)),
+            0x10 => Ok((Instructions::Push(read_u64(bytes)?), 9)),
+            0x11 => Ok((Instructions::Pop, 1)),
+            0x12 => Ok((Instructions::Double, 1)),
+            0x13 => Ok((Instructions::Swap, 1)),
+            0x20 => Ok((Instructions::Add, 1)),
+            0x21 => Ok((Instructions::Subtraction, 1)),
+            0x22 => Ok((Instructions::Product, 1)),
+            0x23 => Ok((Instructions::Divide, 1)),
+            0x30 => Ok((Instructions::Equal, 1)),
+            0x31 => Ok((Instructions::Lower, 1)),
+            0x32 => Ok((Instructions::Greater, 1)),
+            0x40 => Ok((Instructions::Load(read_u8(bytes)?), 2)),
+            0x41 => Ok((Instructions::Store(read_u8(bytes)?), 2)),
+            0x50 => Ok((Instructions::Jump(read_u32(bytes)?), 5)),
+            0x51 => Ok((Instructions::JumpIfZero(read_u32(bytes)?), 5)),
+            0x60 => Ok((Instructions::PushAmount, 1)),
+            0x61 => Ok((Instructions::LoadBalance(read_u8(bytes)?), 2)),
+            0x62 => Ok((Instructions::StoreBalance(read_u8(bytes)?), 2)),
+            other => Err(VMErrors::UnknownOpcode(other)),
+        }
+    }
+    pub fn decode_program(bytes: &[u8]) -> Result<Vec<Instructions>, VMErrors> {
+        let mut res: Vec<Instructions> = vec![];
+        let mut count = 0;
+        while count < bytes.len() {
+            let reste = bytes.get(count..).ok_or(VMErrors::TruncatedOperand)?;
+            let (instruction, size) = Instructions::decode(reste)?;
+            res.push(instruction);
+            count += size;
+        }
+        res
     }
 }
 #[cfg(test)]
