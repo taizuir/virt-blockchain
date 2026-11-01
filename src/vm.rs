@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::vm::VMErrors::{InvalidRole, ProgramTooLong};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VMErrors {
     ProgramTooLong,
@@ -173,15 +175,32 @@ impl Instructions {
         }
     }
     pub fn decode_program(bytes: &[u8]) -> Result<Vec<Instructions>, VMErrors> {
+        if bytes.len() < 4097 {
+            return Err(VMErrors::ProgramTooLong);
+        }
         let mut res: Vec<Instructions> = vec![];
-        let mut count = 0;
+        let mut count: usize = 0;
         while count < bytes.len() {
             let reste = bytes.get(count..).ok_or(VMErrors::TruncatedOperand)?;
             let (instruction, size) = Instructions::decode(reste)?;
             res.push(instruction);
             count += size;
         }
-        res
+        for instru in &res {
+            match instru {
+                Instructions::Jump(t)|Instructions::JumpIfZero(t) => {
+                    if *t as usize >= res.len() {
+                        return Err(VMErrors::InvalidJumpTarget(*t));
+                    }}
+                Instructions::Load(r)|Instructions::LoadBalance(r) =>{if *r>1 {
+                       return  Err(InvalidRole(*r));
+                    
+                }
+                _=>{}}
+                
+            
+        }
+        Ok(res)
     }
 }
 #[cfg(test)]
