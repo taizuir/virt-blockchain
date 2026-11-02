@@ -43,20 +43,20 @@ pub struct Vm {
     memory: [u64; 16],
     gas: u64,
     context: Vec<(String, String, u64)>,
-    persistentstate: BTreeMap<String, u64>,
+    persistent_state: BTreeMap<String, u64>,
 }
 impl Vm {
     pub fn new(context: Vec<(String, String, u64)>) -> Vm {
         let pile = vec![];
         let memory = [0; 16];
         let gas = 10000;
-        let persistentstate = BTreeMap::new();
+        let persistent_state = BTreeMap::new();
         Vm {
             pile,
             memory,
             gas,
             context,
-            persistentstate,
+            persistent_state,
         }
     }
     fn pop(&mut self) -> Result<u64, VMErrors> {
@@ -173,15 +173,35 @@ impl Instructions {
         }
     }
     pub fn decode_program(bytes: &[u8]) -> Result<Vec<Instructions>, VMErrors> {
+        if bytes.len()> 4096{
+            return Err(VMErrors::ProgramTooLong);
+        }
         let mut res: Vec<Instructions> = vec![];
         let mut count = 0;
+
         while count < bytes.len() {
             let reste = bytes.get(count..).ok_or(VMErrors::TruncatedOperand)?;
             let (instruction, size) = Instructions::decode(reste)?;
             res.push(instruction);
             count += size;
         }
-        res
+        for instruction in &res{
+            match instruction {
+                JumpIfZero(t)|Jump(t)=> {
+                    if *t+count>=bytes.len(){
+                        return VMErrors::InvalidJumpTarget;
+                    }
+                
+                }
+                LoadBalance(r)|StoreBalance(r) => {
+                    if *r>1 {
+                        return Err(VMErrors);
+                    }
+                }
+                _=> {}
+            }
+        }
+        Ok(res)
     }
 }
 #[cfg(test)]
