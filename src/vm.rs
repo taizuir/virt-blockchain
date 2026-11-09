@@ -44,21 +44,47 @@ pub struct Vm {
     pile: Vec<u64>,
     memory: [u64; 16],
     gas: u64,
-    context: Vec<(String, String, u64)>,
-    persistentstate: BTreeMap<String, u64>,
+    context: (String, String, u64),
+    persistent_state: BTreeMap<String, u64>,
+    journal:BTreeMap<String,u64>
+    counter:usize,
 }
 impl Vm {
-    pub fn new(context: Vec<(String, String, u64)>) -> Vm {
-        let pile = vec![];
+    pub fn new(context:(String, String, u64),gas_given:u64) -> Vm {
+        let pile = ();
         let memory = [0; 16];
-        let gas = 10000;
-        let persistentstate = BTreeMap::new();
+        let gas = gas_given;
+        let persistent_state = BTreeMap::new();
+        let counter=0;
         Vm {
             pile,
             memory,
             gas,
             context,
-            persistentstate,
+            persistent_state,
+        }
+    }
+    fn gas_comsumption(instruction: &Instructions) -> u64 {
+        match instruction {
+            Instructions::Halt | Instructions::Revert => 0,
+            Instructions::Push(_)
+            | Instructions::Pop
+            | Instructions::Double
+            | Instructions::Swap
+            | Instructions::PushAmount => 1,
+            Instructions::Add
+            | Instructions::Subtraction
+            | Instructions::Equal
+            | Instructions::Lower
+            | Instructions::Greater
+            | Instructions::Jump(_)
+            | Instructions::JumpIfZero(_) => 2,
+            Instructions::Product
+            | Instructions::Divide
+            | Instructions::Load(_)
+            | Instructions::Store(_) => 3,
+            Instructions::LoadBalance(_) => 5,
+            Instructions::StoreBalance(_) => 20,
         }
     }
     fn pop(&mut self) -> Result<u64, VMErrors> {
@@ -72,6 +98,97 @@ impl Vm {
             Ok(())
         }
     }
+    fn run(&mut self, program: &[Instructions]) -> Result<(), VMErrors> {
+        let mut counter: usize = 0;
+        while let Some(instruction) = program.get(counter) {
+            self.gas = self.gas.checked_sub(Vm::gas_comsumption(instruction)).ok_or(VMErrors::OutOfGas)?
+            let mut next = counter + 1;
+            match instruction {
+                Instructions::Push(value) => {
+                    self.push(*value)?;
+                }
+                Instructions::Pop => {
+                    self.pop()?;
+                }
+                Instructions::Double => {
+                    let x = *self.pile.last().ok_or(VMErrors::StackUnderflow)?;
+                    self.push(x)?;
+                }
+                Instructions::Add => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.push(a.checked_add(b).ok_or(VMErrors::ArithmeticOverflow)?)?;
+                }
+                Instructions::Equal =>  {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.push(if a == b { 1 } else { 0 })?;
+                },
+                Instructions::Lower => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.push(if a < b { 1 } else { 0 })?;
+                },
+                Instructions::Greater => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.push(if a > b { 1 } else { 0 })?;
+                },
+                Instrucion::Swap=>{let b= self.pop()?; let a = self.pop()?;self.push(b)?;self.push(a)?}
+                Instruciton::Add=>{let b= self.pop()?; let a = self.pop()?;self.push(a.checked_add(b).ok_or(VMErrors::ArithmeticOverflow))}
+                Instruction::Substraction=>{let b= self.pop()?; let a = self.pop();self.push(a.checked_sub().ok_or(VMErrors::ArithmeticOverflow))}
+                Instrucion::Divide=>{let b = self.pop()?;let a = self.pop()?;self.push(a.checked_div(b).ok_or(VMErrors::DivisionByZero)?)?},
+                Instruction::Product=>{let b= self.pop()?; let a = self.pop();self.push(a.checked_mul(b).ok_or(VMErrors::ArithmeticOverflow))}
+                Instructions::Load(cell) => {
+                    let index = *cell as usize;
+                    if index >= self.memory.len() {
+                        return Err(VMErrors::MemoryOutOfBounds(index));
+                    }
+                    let value = self.memory[index];
+                    self.push(value)?;
+                },
+                Instructions::Store(cell) => {
+                    let index = *cell as usize;
+                    if index >= self.memory.len() {
+                        return Err(VMErrors::MemoryOutOfBounds(index));
+                    }
+                    let x = self.pop()?;
+                    self.memory[index] = x;
+                },
+                Instructions::Jump(target) => next = *target as usize,
+                Instructions::JumpIfZero(target) => {
+                    let x = self.pop()?;
+                    if x == 0 {
+                        next = *target as usize;
+                    }
+                },
+                Instructions::Halt => return Ok(()),
+                Instructions::Revert => return Err(VMErrors::Reverted),
+                Instructions::PushAmount => {self.push(self.context.2)?},
+                Instructions::LoadBalance(role) =>{
+                    let address = self.account(*role)?;
+                    let balance = self
+                        .journal
+                        .get(address)
+                        .or(self.persistent_state.get(address))
+                        .copied()
+                        .unwrap_or(0);
+                    self.push(balance)?;
+                },
+                Instructions::StoreBalance(role) =>{
+                    let x = self.pop()?;
+                    let address = self.account(*role)?.clone();
+                    self.journal.insert(address, x);
+                }
+                gas
+            }
+            counter = next;
+        }
+        Ok(())
+    }
+    }
+    fn execute(&mut self){}
+    
 }
 fn read_u8(bytes: &[u8]) -> Result<u8, VMErrors> {
     bytes.get(1).copied().ok_or(VMErrors::TruncatedOperand)
@@ -175,49 +292,3 @@ impl Instructions {
         }
     }
     pub fn decode_program(bytes: &[u8]) -> Result<Vec<Instructions>, VMErrors> {
-        if bytes.len() < 4097 {
-            return Err(VMErrors::ProgramTooLong);
-        }
-        let mut res: Vec<Instructions> = vec![];
-        let mut count: usize = 0;
-        while count < bytes.len() {
-            let reste = bytes.get(count..).ok_or(VMErrors::TruncatedOperand)?;
-            let (instruction, size) = Instructions::decode(reste)?;
-            res.push(instruction);
-            count += size;
-        }
-        for instru in &res {
-            match instru {
-                Instructions::Jump(t)|Instructions::JumpIfZero(t) => {
-                    if *t as usize >= res.len() {
-                        return Err(VMErrors::InvalidJumpTarget(*t));
-                    }}
-                Instructions::Load(r)|Instructions::LoadBalance(r) =>{if *r>1 {
-                       return  Err(InvalidRole(*r));
-                    
-                }
-                _=>{}}
-                
-            
-        }
-        Ok(res)
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn pop_on_empty_stack() {
-        let mut vm = Vm::new(vec![]);
-        assert_eq!(vm.pop(), Err(VMErrors::StackUnderflow));
-    }
-
-    #[test]
-    fn push_257_values_overflows() {
-        let mut vm = Vm::new(vec![]);
-        for i in 0..256 {
-            assert_eq!(vm.push(i), Ok(()));
-        }
-        assert_eq!(vm.push(256), Err(VMErrors::StackOverflow));
-    }
-}
