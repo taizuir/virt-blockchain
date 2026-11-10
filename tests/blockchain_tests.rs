@@ -3,7 +3,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use virt_blockchain::{sha256::sha256_hex, Blockchain};
+use virt_blockchain::{
+    sha256::sha256_hex,
+    wallet::{Transaction, Wallet},
+    Blockchain,
+};
+
+// Signs a transaction from `from` to `to`, puts it in the mempool, then mines a block with it.
+fn add_block_with_tx(bc: &mut Blockchain, from: &Wallet, to: &Wallet, amount: u64) {
+    let mut tx = Transaction::new(
+        hex::encode(from.public_key.to_bytes()),
+        hex::encode(to.public_key.to_bytes()),
+        amount,
+    );
+    tx.sign(from);
+    bc.asked_transaction(tx);
+    bc.add_block();
+}
 
 // cargo test runs tests in this file on separate threads by default; since
 // the global allocator below counts bytes for the whole process, concurrent
@@ -55,9 +71,10 @@ fn genesis_block_satisfies_difficulty_and_chain_is_valid() {
 #[test]
 fn adding_blocks_keeps_chain_linked_and_valid() {
     let _guard = serialized();
+    let (a, b) = (Wallet::new(), Wallet::new());
     let mut bc = Blockchain::new();
-    bc.add_block("first".into());
-    bc.add_block("second".into());
+    add_block_with_tx(&mut bc, &a, &b, 1);
+    add_block_with_tx(&mut bc, &a, &b, 2);
 
     assert_eq!(bc.chain.len(), 3);
     for i in 0..bc.chain.len() {
@@ -72,10 +89,11 @@ fn adding_blocks_keeps_chain_linked_and_valid() {
 #[test]
 fn tampering_with_data_breaks_validity() {
     let _guard = serialized();
+    let (a, b) = (Wallet::new(), Wallet::new());
     let mut bc = Blockchain::new();
-    bc.add_block("payload".into());
+    add_block_with_tx(&mut bc, &a, &b, 10);
 
-    bc.chain[1].data = "forged payload".into();
+    bc.chain[1].data[0].amount = 1_000_000;
 
     assert!(!bc.is_valid());
 }
@@ -83,9 +101,10 @@ fn tampering_with_data_breaks_validity() {
 #[test]
 fn tampering_with_prev_hash_breaks_validity() {
     let _guard = serialized();
+    let (a, b) = (Wallet::new(), Wallet::new());
     let mut bc = Blockchain::new();
-    bc.add_block("a".into());
-    bc.add_block("b".into());
+    add_block_with_tx(&mut bc, &a, &b, 1);
+    add_block_with_tx(&mut bc, &a, &b, 2);
 
     bc.chain[2].prev_hash = "0".repeat(64);
 
@@ -95,8 +114,9 @@ fn tampering_with_prev_hash_breaks_validity() {
 #[test]
 fn mined_hash_matches_recomputed_hash() {
     let _guard = serialized();
+    let (a, b) = (Wallet::new(), Wallet::new());
     let mut bc = Blockchain::new();
-    bc.add_block("check".into());
+    add_block_with_tx(&mut bc, &a, &b, 5);
 
     let last = bc.access_last();
     assert_eq!(last.hash, last.calculate_hash());
@@ -179,9 +199,10 @@ fn heap_usage_scales_with_chain_length_and_is_freed_on_drop() {
     let _guard = serialized();
     let baseline = live_bytes();
 
+    let (a, b) = (Wallet::new(), Wallet::new());
     let mut bc = Blockchain::new();
     for i in 0..20 {
-        bc.add_block(format!("block {i}"));
+        add_block_with_tx(&mut bc, &a, &b, i);
     }
 
     let with_chain = live_bytes();
@@ -206,5 +227,3 @@ fn heap_usage_scales_with_chain_length_and_is_freed_on_drop() {
         "chain's memory doesn't look released after drop: freed {freed} of {growth} bytes"
     );
 }
-
-

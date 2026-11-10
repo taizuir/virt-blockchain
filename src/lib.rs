@@ -514,7 +514,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "faille connue : is_valid ne vérifie pas la difficulté"]
     fn rejects_block_without_proof_of_work() {
         let mut bc = healthy_chain();
         let target = "0".repeat(bc.difficulty);
@@ -530,7 +529,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "faille connue : is_valid ne vérifie pas le genesis"]
     fn rejects_forged_genesis() {
         let mut bc = Blockchain::new();
         bc.chain[0].index = 5;
