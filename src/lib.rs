@@ -65,7 +65,16 @@ impl Block {
     }
 
     pub fn genesis(difficulty: usize) -> Block {
-        Block::new(0, vec![], String::from("0"), difficulty)
+        let mut block = Block {
+            index: 0,
+            timestamp: 0,
+            data: vec![],
+            prev_hash: String::from("0"),
+            hash: String::new(),
+            nonce: 0,
+        };
+        block.mine(difficulty);
+        block
     }
 }
 // la bockchain contient les blocs une difculté choisi et une liste de transacton a ajouter
@@ -73,6 +82,7 @@ pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,
     pub mempool: Vec<Transaction>,
+    pub counts: BTreeMap<String, u64>,
 }
 
 impl Blockchain {
@@ -81,6 +91,7 @@ impl Blockchain {
             chain: vec![Block::genesis(1)],
             difficulty: 1,
             mempool: vec![],
+            counts: BTreeMap::new(),
         }
     }
     //new rendu plus difficulté
@@ -89,7 +100,12 @@ impl Blockchain {
             chain: vec![Block::genesis(difficulty)],
             difficulty,
             mempool: vec![],
+            counts: BTreeMap::new(),
         }
+    }
+    pub fn expected_count(&self, from: &str) -> u64 {
+        self.counts.get(from).copied().unwrap_or(0)
+            + self.mempool.iter().filter(|x| x.from == from).count() as u64
     }
     // donne accès au dernier elemetn
     pub fn access_last(&self) -> &Block {
@@ -98,6 +114,9 @@ impl Blockchain {
 
     pub fn add_block(&mut self) {
         let clean_mempool = take(&mut self.mempool);
+        for t in &clean_mempool {
+            *self.counts.entry(t.from.clone()).or_insert(0) += 1;
+        }
         let prev_hash = self.access_last().hash.clone();
         let new_index = self.access_last().index + 1;
         let new_block = Block::new(new_index, clean_mempool, prev_hash, self.difficulty);
@@ -117,6 +136,7 @@ impl Blockchain {
         } else if self.chain[0].hash != self.chain[0].calculate_hash() {
             return false;
         }
+        let mut seen = BTreeMap::new();
 
         for i in 1..self.chain.len() {
             if !(self.chain[i].hash.starts_with(&target)) {
@@ -128,7 +148,13 @@ impl Blockchain {
                 if !i.verify() {
                     return false;
                 }
+                let n = seen.entry(i.from.clone()).or_insert(0);
+                if i.count != *n {
+                    return false;
+                }
+                *n += 1;
             }
+
             if current.hash != current.calculate_hash() {
                 return false; // intégrité du bloc cassée
             }
@@ -141,13 +167,15 @@ impl Blockchain {
         }
         true
     }
-    pub fn asked_transaction(&mut self, t: Transaction) -> () {
-        if t.verify() {
-            self.mempool.push(t)
+    pub fn asked_transaction(&mut self, t: Transaction) -> bool {
+        if t.verify() && t.count != self.expected_count(&t.from) {
+            self.mempool.push(t);
+            return true;
+        } else {
+            return false;
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,9 +417,9 @@ mod tests {
         let a = Wallet::new();
         let b = Wallet::new();
         let mut bc = Blockchain::with_difficulty(DIFFICULTY);
-        bc.asked_transaction(signed_tx(&a, &b, 10));
-        bc.asked_transaction(signed_tx(&a, &b, 20));
-        bc.asked_transaction(signed_tx(&b, &a, 5));
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 10, 0)));
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 20, 1)));
+        assert!(bc.asked_transaction(tx_with_count(&b, &a, 5, 0)));
         let genesis_hash = bc.chain[0].hash.clone();
 
         bc.add_block();
@@ -409,8 +437,8 @@ mod tests {
         let a = Wallet::new();
         let b = Wallet::new();
         let mut bc = Blockchain::with_difficulty(DIFFICULTY);
-        for amount in [3, 1, 2] {
-            bc.asked_transaction(signed_tx(&a, &b, amount));
+        for (count, amount) in [3, 1, 2].into_iter().enumerate() {
+            assert!(bc.asked_transaction(tx_with_count(&a, &b, amount, count as u64)));
         }
         bc.add_block();
         let amounts: Vec<u64> = bc.access_last().data.iter().map(|t| t.amount).collect();
@@ -432,7 +460,7 @@ mod tests {
         let b = Wallet::new();
         let mut bc = Blockchain::with_difficulty(DIFFICULTY);
         for i in 0..3 {
-            bc.asked_transaction(signed_tx(&a, &b, i));
+            assert!(bc.asked_transaction(tx_with_count(&a, &b, i, i)));
             bc.add_block();
         }
         let target = "0".repeat(DIFFICULTY);
@@ -535,5 +563,242 @@ mod tests {
         bc.chain[0].prev_hash = "forgé".to_string();
         bc.chain[0].hash = bc.chain[0].calculate_hash();
         assert!(!bc.is_valid());
+    }
+
+    // ───────────────────────────── REJEU ─────────────────────────────
+    // À coller dans `mod tests` de src/lib.rs (en bas, avant l'accolade fermante).
+
+    // Transaction signée avec un `count` choisi. Le count est posé AVANT la signature :
+    // il fait partie du payload signé.
+    fn tx_with_count(from: &Wallet, to: &Wallet, amount: u64, count: u64) -> Transaction {
+        let mut tx = Transaction::new(address(from), address(to), amount);
+        tx.count = count;
+        tx.sign(from);
+        tx
+    }
+
+    // Transaction avec le prochain count attendu pour `from` (confirmé + en attente).
+    fn next_tx(bc: &Blockchain, from: &Wallet, to: &Wallet, amount: u64) -> Transaction {
+        tx_with_count(from, to, amount, bc.expected_count(&address(from)))
+    }
+
+    #[test]
+    fn asked_transaction_returns_true_when_accepted() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 5, 0)));
+    }
+
+    #[test]
+    fn asked_transaction_returns_false_when_rejected() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        let unsigned = Transaction::new(address(&a), address(&b), 5);
+        assert!(!bc.asked_transaction(unsigned));
+        assert!(bc.mempool.is_empty());
+    }
+
+    #[test]
+    fn expected_count_starts_at_zero_for_unknown_account() {
+        let a = Wallet::new();
+        let bc = Blockchain::with_difficulty(DIFFICULTY);
+        assert_eq!(bc.expected_count(&address(&a)), 0);
+    }
+
+    #[test]
+    fn first_transaction_of_an_account_must_have_count_zero() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        assert!(!bc.asked_transaction(tx_with_count(&a, &b, 5, 1)));
+        assert!(bc.mempool.is_empty());
+    }
+
+    #[test]
+    fn same_transaction_twice_in_mempool_is_rejected() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        let tx = tx_with_count(&a, &b, 5, 0);
+        assert!(bc.asked_transaction(tx.clone()));
+        assert!(!bc.asked_transaction(tx));
+        assert_eq!(bc.mempool.len(), 1);
+    }
+
+    #[test]
+    fn replay_of_an_included_transaction_is_rejected() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        let tx = tx_with_count(&a, &b, 5, 0);
+        assert!(bc.asked_transaction(tx.clone()));
+        bc.add_block();
+
+        // L'attaquant renvoie exactement la même transaction, signature comprise.
+        assert!(!bc.asked_transaction(tx));
+        assert!(bc.mempool.is_empty());
+    }
+
+    #[test]
+    fn skipped_count_is_rejected() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 1, 0)));
+        assert!(!bc.asked_transaction(tx_with_count(&a, &b, 1, 2)));
+        assert_eq!(bc.mempool.len(), 1);
+    }
+
+    #[test]
+    fn consecutive_counts_are_accepted_in_the_same_mempool() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        for count in 0..3 {
+            assert!(
+                bc.asked_transaction(tx_with_count(&a, &b, 1, count)),
+                "count {count}"
+            );
+        }
+        assert_eq!(bc.mempool.len(), 3);
+        assert_eq!(bc.expected_count(&address(&a)), 3);
+    }
+
+    #[test]
+    fn counts_continue_across_blocks() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 1, 0)));
+        bc.add_block();
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 1, 1)));
+        bc.add_block();
+        assert_eq!(bc.expected_count(&address(&a)), 2);
+        // L'ancien count 0 ne repasse plus.
+        assert!(!bc.asked_transaction(tx_with_count(&a, &b, 1, 0)));
+    }
+
+    #[test]
+    fn counts_are_independent_per_account() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 1, 0)));
+        assert!(bc.asked_transaction(tx_with_count(&b, &a, 1, 0)));
+        assert_eq!(bc.mempool.len(), 2);
+    }
+
+    #[test]
+    fn add_block_updates_counts_of_senders_only() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 1, 0)));
+        assert!(bc.asked_transaction(tx_with_count(&a, &b, 1, 1)));
+        bc.add_block();
+        assert_eq!(bc.counts.get(&address(&a)).copied(), Some(2));
+        assert_eq!(bc.counts.get(&address(&b)).copied().unwrap_or(0), 0);
+        assert_eq!(bc.expected_count(&address(&b)), 0);
+    }
+
+    #[test]
+    fn rejected_transaction_changes_nothing() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        assert!(!bc.asked_transaction(tx_with_count(&a, &b, 1, 7)));
+        assert!(bc.mempool.is_empty());
+        assert!(bc.counts.is_empty());
+        assert_eq!(bc.expected_count(&address(&a)), 0);
+    }
+
+    #[test]
+    fn count_is_covered_by_the_signature() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        let mut tx = tx_with_count(&a, &b, 5, 0);
+        assert!(tx.verify());
+        // Modifier le count après la signature doit casser la vérification.
+        tx.count = 1;
+        assert!(!tx.verify());
+        assert!(!bc.asked_transaction(tx));
+    }
+
+    #[test]
+    fn next_tx_helper_builds_an_acceptable_sequence() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        for amount in 1..=4 {
+            let tx = next_tx(&bc, &a, &b, amount);
+            assert!(bc.asked_transaction(tx), "amount {amount}");
+        }
+        bc.add_block();
+        let tx = next_tx(&bc, &a, &b, 9);
+        assert_eq!(tx.count, 4);
+        assert!(bc.asked_transaction(tx));
+    }
+
+    // ── is_valid : une chaîne fabriquée à la main doit être refusée ──
+    // Block::new mine le bloc, donc le hash et la preuve de travail sont corrects :
+    // seule la règle des counts peut le rejeter.
+
+    fn push_forged_block(bc: &mut Blockchain, txs: Vec<Transaction>) {
+        let prev = bc.access_last();
+        let block = Block::new(prev.index + 1, txs, prev.hash.clone(), bc.difficulty);
+        bc.chain.push(block);
+    }
+
+    #[test]
+    fn is_valid_accepts_a_chain_with_correct_counts() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        for _ in 0..3 {
+            let tx = next_tx(&bc, &a, &b, 1);
+            assert!(bc.asked_transaction(tx));
+            let tx = next_tx(&bc, &b, &a, 1);
+            assert!(bc.asked_transaction(tx));
+            bc.add_block();
+        }
+        assert!(bc.is_valid());
+    }
+
+    #[test]
+    fn is_valid_rejects_a_replayed_transaction_in_a_later_block() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        let tx = tx_with_count(&a, &b, 5, 0);
+        assert!(bc.asked_transaction(tx.clone()));
+        bc.add_block();
+        assert!(bc.is_valid());
+
+        push_forged_block(&mut bc, vec![tx]);
+        assert!(!bc.is_valid());
+    }
+
+    #[test]
+    fn is_valid_rejects_a_replay_inside_the_same_block() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        let tx = tx_with_count(&a, &b, 5, 0);
+        push_forged_block(&mut bc, vec![tx.clone(), tx]);
+        assert!(!bc.is_valid());
+    }
+
+    #[test]
+    fn is_valid_rejects_a_first_transaction_with_nonzero_count() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        push_forged_block(&mut bc, vec![tx_with_count(&a, &b, 5, 1)]);
+        assert!(!bc.is_valid());
+    }
+
+    #[test]
+    fn is_valid_rejects_counts_in_the_wrong_order() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut bc = Blockchain::with_difficulty(DIFFICULTY);
+        push_forged_block(
+            &mut bc,
+            vec![tx_with_count(&a, &b, 1, 1), tx_with_count(&a, &b, 1, 0)],
+        );
+        assert!(!bc.is_valid());
+    }
+
+    #[test]
+    fn genesis_is_deterministic() {
+        let a = Block::genesis(DIFFICULTY);
+        let b = Block::genesis(DIFFICULTY);
+        assert_eq!(a.hash, b.hash);
+        assert_eq!(a.timestamp, 0);
     }
 }

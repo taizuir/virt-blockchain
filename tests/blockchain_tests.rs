@@ -1,23 +1,25 @@
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use virt_blockchain::{
+    Blockchain,
     sha256::sha256_hex,
     wallet::{Transaction, Wallet},
-    Blockchain,
 };
 
 // Signs a transaction from `from` to `to`, puts it in the mempool, then mines a block with it.
 fn add_block_with_tx(bc: &mut Blockchain, from: &Wallet, to: &Wallet, amount: u64) {
+    let from_addr = hex::encode(from.public_key.to_bytes());
     let mut tx = Transaction::new(
-        hex::encode(from.public_key.to_bytes()),
+        from_addr.clone(),
         hex::encode(to.public_key.to_bytes()),
         amount,
     );
+    tx.count = bc.expected_count(&from_addr); // le count est signé : à poser avant sign()
     tx.sign(from);
-    bc.asked_transaction(tx);
+    assert!(bc.asked_transaction(tx));
     bc.add_block();
 }
 
@@ -27,7 +29,9 @@ fn add_block_with_tx(bc: &mut Blockchain, from: &Wallet, to: &Wallet, amount: u6
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn serialized() -> std::sync::MutexGuard<'static, ()> {
-    TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 // Wraps the system allocator to track live (allocated - freed) bytes for this
@@ -211,7 +215,10 @@ fn heap_usage_scales_with_chain_length_and_is_freed_on_drop() {
         "heap growth for 21 blocks: {growth} bytes (~{:.1} bytes/block)",
         growth as f64 / 21.0
     );
-    assert!(growth > 0, "expected heap usage to grow as blocks are added");
+    assert!(
+        growth > 0,
+        "expected heap usage to grow as blocks are added"
+    );
 
     drop(bc);
     let after_drop = live_bytes();
@@ -226,4 +233,31 @@ fn heap_usage_scales_with_chain_length_and_is_freed_on_drop() {
         freed as f64 >= growth as f64 * 0.8,
         "chain's memory doesn't look released after drop: freed {freed} of {growth} bytes"
     );
+}
+
+// Attaque : rejeu. Principe, résultat avant correction et correctif à noter pour le rapport.
+#[test]
+fn replay_attack_is_rejected_and_chain_stays_valid() {
+    let _guard = serialized();
+    let (alice, bob) = (Wallet::new(), Wallet::new());
+    let mut bc = Blockchain::new();
+
+    let mut tx = Transaction::new(
+        hex::encode(alice.public_key.to_bytes()),
+        hex::encode(bob.public_key.to_bytes()),
+        100,
+    );
+    tx.sign(&alice);
+    assert!(bc.asked_transaction(tx.clone()));
+    bc.add_block();
+
+    // L'attaquant ne connaît pas la clé d'Alice : il recopie la transaction telle quelle, 10 fois.
+    for _ in 0..10 {
+        assert!(!bc.asked_transaction(tx.clone()));
+    }
+    bc.add_block();
+
+    assert_eq!(bc.chain[1].data.len(), 1);
+    assert!(bc.chain[2].data.is_empty());
+    assert!(bc.is_valid());
 }
