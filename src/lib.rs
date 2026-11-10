@@ -168,7 +168,7 @@ impl Blockchain {
         true
     }
     pub fn asked_transaction(&mut self, t: Transaction) -> bool {
-        if t.verify() && t.count != self.expected_count(&t.from) {
+        if t.verify() && t.count == self.expected_count(&t.from) {
             self.mempool.push(t);
             return true;
         } else {
