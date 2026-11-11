@@ -7,7 +7,7 @@ pub struct Wallet {
     signing_key: SigningKey,
 }
 //descriptif  de transaction
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Transaction {
     pub from: String,
     pub to: String,

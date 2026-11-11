@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
-
+pub mod node;
 pub mod sha256;
 pub mod wallet;
 use sha256::sha256_hex;
 use std::mem::take;
 use wallet::Transaction;
-pub mod vm;
+//pub mod vm;
 //un simple bloc sur le blockcahin il contient son numero sa date de création  une transacation le hash de la clé en cour le hashde la clé du block precedent
+#[derive(Clone, Debug, PartialEq)]
 pub struct Block {
     pub index: u64,
     pub timestamp: u64,
@@ -78,6 +79,7 @@ impl Block {
     }
 }
 // la bockchain contient les blocs une difculté choisi et une liste de transacton a ajouter
+#[derive(Clone, Debug)]
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,
