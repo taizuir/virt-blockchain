@@ -72,12 +72,12 @@ fn read_u64(bytes: &[u8], pos: &mut usize) -> Result<u64, MessageError> {
     Ok(u64::from_be_bytes(array))
 }
 
-fn read_string(_bytes: &[u8], _pos: &mut usize) -> Result<String, MessageError> {
+fn read_string(bytes: &[u8], _pos: &mut usize) -> Result<String, MessageError> {
     let mut p = *_pos;
-    let n = read_u8(_bytes, &mut p)?;
+    let n = read_u32(bytes, &mut p)?;
 
     if n > MAX_STRING {
-        return Err(MessageError::TooLarge(n));
+        return Err(MessageError::StringTooLong(n));
     }
     let end = p.checked_add(n as usize).ok_or(MessageError::Truncated)?;
     let slice = bytes.get(p..end).ok_or(MessageError::Truncated)?;
@@ -119,11 +119,13 @@ fn read_transaction(_bytes: &[u8], _pos: &mut usize) -> Result<Transaction, Mess
         }
         _ => return Err(MessageError::InvalidSignature),
     };
+    *_pos = p;
 
     Ok(Transaction {
         from,
         to,
         amount,
+        count,
         signature,
     })
 }
