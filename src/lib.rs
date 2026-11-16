@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+pub mod message;
 pub mod node;
 pub mod sha256;
 pub mod wallet;
