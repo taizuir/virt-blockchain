@@ -1,5 +1,9 @@
 use crate::Blockchain;
+use crate::message::Message::{self, Chain, GetChain, NewBlock, NewTransaction};
 use crate::wallet::Transaction;
+use ed25519_dalek::VerifyingKey;
+use ed25519_dalek::ed25519::signature::Result;
+use std::mem::take;
 
 struct Node {
     id: u32,
@@ -36,6 +40,72 @@ impl Node {
         }
         self.peers.push(addr);
         true
+    }
+    pub fn handle_message(&mut self, msg: Message, from: &str) -> Vec<(String, Message)> {
+        let others: Vec<String> = self
+            .peers
+            .iter()
+            .filter(|p| p.as_str() != from)
+            .cloned()
+            .collect();
+        match msg {
+            Message::NewTransaction(t) => {
+                if !self.submit_transaction(t.clone()) {
+                    return vec![];
+                }
+                others
+                    .into_iter()
+                    .map(|p| (p, Message::NewTransaction(t.clone())))
+                    .collect()
+            }
+            Message::NewBlock(b) => {
+                let behind = b.index > self.chain.access_last().index + 1;
+                self.chain.chain.push(b.clone());
+                if !self.chain.is_valid() {
+                    self.chain.chain.pop();
+                    return if behind {
+                        vec![(from.to_string(), Message::GetChain)]
+                    } else {
+                        vec![]
+                    };
+                }
+                for t in &b.data {
+                    *self.chain.counts.entry(t.from.clone()).or_insert(0) += 1;
+                }
+                for t in take(&mut self.chain.mempool) {
+                    if !b.data.contains(&t) {
+                        self.chain.asked_transaction(t);
+                    }
+                }
+                others
+                    .into_iter()
+                    .map(|p| (p, Message::NewBlock(b.clone())))
+                    .collect()
+            }
+            Message::GetChain => vec![(from.to_string(), Message::Chain(self.chain.chain.clone()))],
+            Message::Chain(blocks) => {
+                if blocks.len() <= self.chain.chain.len() || blocks[0] != self.chain.chain[0] {
+                    return vec![];
+                }
+                let mut candidate = self.chain.clone();
+                candidate.chain = blocks;
+                if !candidate.is_valid() {
+                    return vec![];
+                }
+                candidate.counts.clear();
+                for block in &candidate.chain {
+                    for t in &block.data {
+                        *candidate.counts.entry(t.from.clone()).or_insert(0) += 1;
+                    }
+                }
+                let pending = take(&mut candidate.mempool);
+                self.chain = candidate;
+                for t in pending {
+                    self.chain.asked_transaction(t);
+                }
+                vec![]
+            }
+        }
     }
 }
 #[cfg(test)]
@@ -200,5 +270,261 @@ mod tests {
                 "127.0.0.1:7004".to_string(),
             ]
         );
+    }
+    fn node_with_peers(id: u32, port: u16, peers: &[u16]) -> Node {
+        let mut n = test_node(id, port);
+        for p in peers {
+            assert!(n.add_peer(format!("127.0.0.1:{p}")));
+        }
+        n
+    }
+
+    fn addr(port: u16) -> String {
+        format!("127.0.0.1:{port}")
+    }
+
+    #[test]
+    fn new_valid_transaction_is_forwarded_to_all_peers_but_sender() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut node = node_with_peers(1, 7001, &[7002, 7003, 7004]);
+        let t = signed_tx(&a, &b, 5, 0);
+        let out = node.handle_message(Message::NewTransaction(t.clone()), &addr(7002));
+        assert_eq!(node.chain.mempool.len(), 1);
+        let dests: Vec<String> = out.iter().map(|(d, _)| d.clone()).collect();
+        assert_eq!(dests, vec![addr(7003), addr(7004)]);
+        assert!(
+            out.iter()
+                .all(|(_, m)| *m == Message::NewTransaction(t.clone()))
+        );
+    }
+
+    #[test]
+    fn known_transaction_is_not_forwarded_again() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut node = node_with_peers(1, 7001, &[7002, 7003]);
+        let t = signed_tx(&a, &b, 5, 0);
+        assert!(
+            !node
+                .handle_message(Message::NewTransaction(t.clone()), &addr(7002))
+                .is_empty()
+        );
+        assert!(
+            node.handle_message(Message::NewTransaction(t), &addr(7003))
+                .is_empty()
+        );
+        assert_eq!(node.chain.mempool.len(), 1);
+    }
+
+    #[test]
+    fn invalid_transaction_is_not_forwarded() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut node = node_with_peers(1, 7001, &[7002, 7003]);
+        let unsigned = Transaction::new(address(&a), address(&b), 5);
+        assert!(
+            node.handle_message(Message::NewTransaction(unsigned), &addr(7002))
+                .is_empty()
+        );
+        assert!(
+            node.handle_message(
+                Message::NewTransaction(signed_tx(&a, &b, 5, 9)),
+                &addr(7002)
+            )
+            .is_empty()
+        );
+        assert!(node.chain.mempool.is_empty());
+    }
+
+    #[test]
+    fn forwarding_with_no_peers_returns_nothing() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut node = test_node(1, 7001);
+        let out = node.handle_message(
+            Message::NewTransaction(signed_tx(&a, &b, 5, 0)),
+            &addr(7002),
+        );
+        assert!(out.is_empty());
+        assert_eq!(node.chain.mempool.len(), 1);
+    }
+
+    #[test]
+    fn get_chain_answers_with_the_full_chain_to_the_sender() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut node = node_with_peers(1, 7001, &[7002, 7003]);
+        assert!(node.submit_transaction(signed_tx(&a, &b, 5, 0)));
+        node.mine();
+        let out = node.handle_message(Message::GetChain, &addr(7003));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0, addr(7003));
+        assert_eq!(out[0].1, Message::Chain(node.chain.chain.clone()));
+        assert_eq!(node.blockchain_len(), 2);
+    }
+
+    #[test]
+    fn valid_block_is_accepted_cleans_mempool_and_is_forwarded() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut miner = test_node(1, 7001);
+        let mut node = node_with_peers(2, 7002, &[7001, 7003]);
+        let t0 = signed_tx(&a, &b, 5, 0);
+        assert!(miner.submit_transaction(t0.clone()));
+        miner.mine();
+        assert!(node.submit_transaction(t0.clone()));
+        let block = miner.chain.access_last().clone();
+
+        let out = node.handle_message(Message::NewBlock(block.clone()), &addr(7001));
+        assert_eq!(node.blockchain_len(), 2);
+        assert!(node.chain.mempool.is_empty());
+        assert!(node.is_chain_valid());
+        assert_eq!(node.chain.expected_count(&address(&a)), 1);
+        assert_eq!(out, vec![(addr(7003), Message::NewBlock(block))]);
+    }
+
+    #[test]
+    fn same_block_twice_is_not_forwarded_again() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut miner = test_node(1, 7001);
+        let mut node = node_with_peers(2, 7002, &[7001, 7003]);
+        assert!(miner.submit_transaction(signed_tx(&a, &b, 5, 0)));
+        miner.mine();
+        let block = miner.chain.access_last().clone();
+        assert!(
+            !node
+                .handle_message(Message::NewBlock(block.clone()), &addr(7001))
+                .is_empty()
+        );
+        assert!(
+            node.handle_message(Message::NewBlock(block), &addr(7001))
+                .is_empty()
+        );
+        assert_eq!(node.blockchain_len(), 2);
+    }
+
+    #[test]
+    fn invalid_block_is_rejected_and_chain_is_untouched() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut miner = test_node(1, 7001);
+        let mut node = node_with_peers(2, 7002, &[7001, 7003]);
+        assert!(miner.submit_transaction(signed_tx(&a, &b, 5, 0)));
+        miner.mine();
+        let good = miner.chain.access_last().clone();
+        let before = node.chain.chain.clone();
+
+        let mut tampered = good.clone();
+        tampered.data[0].amount = 999;
+        assert!(
+            node.handle_message(Message::NewBlock(tampered), &addr(7001))
+                .is_empty()
+        );
+
+        let mut wrong_link = good.clone();
+        wrong_link.prev_hash = "ff".to_string();
+        assert!(
+            node.handle_message(Message::NewBlock(wrong_link), &addr(7001))
+                .is_empty()
+        );
+
+        let mut fake_pow = good;
+        fake_pow.nonce += 1;
+        assert!(
+            node.handle_message(Message::NewBlock(fake_pow), &addr(7001))
+                .is_empty()
+        );
+
+        assert_eq!(node.chain.chain, before);
+        assert!(node.chain.counts.is_empty());
+    }
+
+    #[test]
+    fn block_far_ahead_triggers_a_get_chain_to_the_sender() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut miner = test_node(1, 7001);
+        for c in 0..3 {
+            assert!(miner.submit_transaction(signed_tx(&a, &b, 1, c)));
+            miner.mine();
+        }
+        let mut node = node_with_peers(2, 7002, &[7001]);
+        let tip = miner.chain.access_last().clone();
+        let out = node.handle_message(Message::NewBlock(tip), &addr(7001));
+        assert_eq!(out, vec![(addr(7001), Message::GetChain)]);
+        assert_eq!(node.blockchain_len(), 1);
+    }
+
+    #[test]
+    fn longer_valid_chain_is_adopted() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut leader = test_node(1, 7001);
+        for c in 0..3 {
+            assert!(leader.submit_transaction(signed_tx(&a, &b, 1, c)));
+            leader.mine();
+        }
+        let mut node = node_with_peers(2, 7002, &[7001]);
+        let stale = signed_tx(&a, &b, 1, 0);
+        assert!(node.submit_transaction(stale));
+        let out = node.handle_message(Message::Chain(leader.chain.chain.clone()), &addr(7001));
+        assert!(out.is_empty());
+        assert_eq!(node.blockchain_len(), 4);
+        assert!(node.is_chain_valid());
+        assert_eq!(node.chain.expected_count(&address(&a)), 3);
+        assert!(node.chain.mempool.is_empty());
+    }
+
+    #[test]
+    fn shorter_equal_or_invalid_chains_are_ignored() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut node = test_node(1, 7001);
+        for c in 0..2 {
+            assert!(node.submit_transaction(signed_tx(&a, &b, 1, c)));
+            node.mine();
+        }
+        let before = node.chain.chain.clone();
+
+        let mut shorter = test_node(2, 7002);
+        assert!(shorter.submit_transaction(signed_tx(&a, &b, 1, 0)));
+        shorter.mine();
+        node.handle_message(Message::Chain(shorter.chain.chain.clone()), &addr(7002));
+        node.handle_message(Message::Chain(before.clone()), &addr(7002));
+        assert_eq!(node.chain.chain, before);
+
+        let mut longer = test_node(3, 7003);
+        for c in 0..4 {
+            assert!(longer.submit_transaction(signed_tx(&a, &b, 1, c)));
+            longer.mine();
+        }
+        let mut forged = longer.chain.chain.clone();
+        forged[2].data[0].amount = 777;
+        node.handle_message(Message::Chain(forged), &addr(7003));
+        assert_eq!(node.chain.chain, before);
+        assert_eq!(node.chain.expected_count(&address(&a)), 2);
+    }
+
+    #[test]
+    fn chain_with_a_different_genesis_is_ignored() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut node = test_node(1, 7001);
+        let mut other = Node::new(2, addr(7002), DIFFICULTY);
+        other.chain.chain[0].nonce += 1;
+        for c in 0..3 {
+            assert!(other.submit_transaction(signed_tx(&a, &b, 1, c)));
+            other.mine();
+        }
+        node.handle_message(Message::Chain(other.chain.chain.clone()), &addr(7002));
+        assert_eq!(node.blockchain_len(), 1);
+    }
+
+    #[test]
+    fn two_nodes_converge_through_messages() {
+        let (a, b) = (Wallet::new(), Wallet::new());
+        let mut x = node_with_peers(1, 7001, &[7002]);
+        let mut y = node_with_peers(2, 7002, &[7001]);
+        let t = signed_tx(&a, &b, 5, 0);
+        let out = x.handle_message(Message::NewTransaction(t), &addr(9999));
+        for (dest, m) in out {
+            assert_eq!(dest, addr(7002));
+            y.handle_message(m, &addr(7001));
+        }
+        x.mine();
+        let block = x.chain.access_last().clone();
+        y.handle_message(Message::NewBlock(block), &addr(7001));
+        assert_eq!(x.chain.chain, y.chain.chain);
+        assert!(y.is_chain_valid());
     }
 }
